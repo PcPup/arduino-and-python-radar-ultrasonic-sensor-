@@ -1,0 +1,96 @@
+#include <Servo.h>
+
+// Pin assignments
+const uint8_t SERVO_PIN = A0;   // servo signal on analog pin A0 (digital 14)
+const uint8_t TRIG_PIN  = 7;    // HC-SR04 TRIG
+const uint8_t ECHO_PIN  = 6;    // HC-SR04 ECHO
+
+Servo scanServo;
+
+// Requested sweep angles
+const int MIN_ANGLE = 5;      // degrees (user requested)
+const int MAX_ANGLE = 175;    // degrees (user requested)
+const int STEP = 5;           // degrees per step
+const unsigned long STEP_DELAY_MS = 1UL; // move & measurement interval = 0.1 s
+
+// Microsecond pulse range used for mapping angles.
+// Typical safe range accepted by many servos: ~544 .. 2400 µs.
+// If your servo has a different calibration adjust these.
+const int MIN_US = 544;
+const int MAX_US = 2400;
+
+// HC-SR04 timeout (microseconds). 30000us ~ max ~5 meters (echo roundtrip)
+const unsigned long PULSE_TIMEOUT = 30000UL;
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  scanServo.attach(SERVO_PIN);
+  scanServo.writeMicroseconds(angleToMicroseconds(MIN_ANGLE));
+  delay(200); // let servo settle
+
+  Serial.println("time_ms,angle_deg,distance_cm");
+}
+
+void loop() {
+  // sweep up
+  for (int angle = MIN_ANGLE; angle <= MAX_ANGLE; angle += STEP) {
+    scanServo.writeMicroseconds(angleToMicroseconds(angle));
+    delay(STEP_DELAY_MS);
+    printReading(angle);
+  }
+
+  // sweep down
+  for (int angle = MAX_ANGLE; angle >= MIN_ANGLE; angle -= STEP) {
+    scanServo.writeMicroseconds(angleToMicroseconds(angle));
+    delay(STEP_DELAY_MS);
+    printReading(angle);
+  }
+}
+
+long readDistanceCm() {
+  // Send trigger pulse
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  // Read echo - returns pulse length in microseconds
+  unsigned long duration = pulseIn(ECHO_PIN, HIGH, PULSE_TIMEOUT);
+
+  if (duration == 0) {
+    // no echo received (out of range or blocked)
+    return -1;
+  }
+
+  // Convert to cm: distance_cm = duration / 58 (approx)
+  long distanceCm = duration / 58;
+  return distanceCm;
+}
+
+void printReading(int angle) {
+  long d = readDistanceCm();
+  unsigned long t = millis();
+  Serial.print(t);
+  Serial.print(",");
+  Serial.print(angle);
+  Serial.print(",");
+  if (d >= 0) Serial.println(d);
+  else Serial.println("out");
+}
+
+// Map requested angle range to pulse width (microseconds).
+// Note: many standard servos only accept 0..180 degrees. If your servo
+// cannot move beyond 180 deg, the library may saturate or behave unexpectedly.
+// Using writeMicroseconds lets you attempt a wider range; mechanical limits still apply.
+int angleToMicroseconds(int angle) {
+  // Constrain angle to the requested numeric range just in case
+  if (angle < MIN_ANGLE) angle = MIN_ANGLE;
+  if (angle > MAX_ANGLE) angle = MAX_ANGLE;
+  // Map angle into microsecond range
+  long us = map(angle, MIN_ANGLE, MAX_ANGLE, MIN_US, MAX_US);
+  return (int)us;
+}
